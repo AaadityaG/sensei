@@ -8,8 +8,9 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+      <div className="min-h-svh bg-background flex flex-col items-center justify-center gap-3">
         <Spinner />
+        <p className="text-sm text-muted-foreground">Checking your session…</p>
       </div>
     )
   }

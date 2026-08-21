@@ -1,4 +1,5 @@
 import { GoogleLogin, type CredentialResponse } from '@react-oauth/google'
+import { Separator } from '@/components/ui/separator'
 import {
   errorMessage,
   useGoogleAuthMutation,
@@ -17,11 +18,11 @@ export default function GoogleButton({
   if (!clientId) return null
 
   return (
-    <>
-      <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-gray-500">
-        <span className="h-px flex-1 bg-gray-800" />
+    <div className="flex flex-col gap-4">
+      <div className="text-muted-foreground flex items-center gap-3 text-xs uppercase tracking-wide">
+        <Separator className="flex-1" />
         or
-        <span className="h-px flex-1 bg-gray-800" />
+        <Separator className="flex-1" />
       </div>
       <div className="flex justify-center">
         <GoogleLogin
@@ -39,6 +40,6 @@ export default function GoogleButton({
           onError={() => onError('Google sign-in failed')}
         />
       </div>
-    </>
+    </div>
   )
 }

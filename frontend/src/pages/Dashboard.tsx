@@ -1,122 +1,105 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useDispatch } from 'react-redux'
-import { api } from '../services/api'
+import { AppShell } from '@/components/AppShell'
 import {
   errorMessage,
   useGetMeQuery,
-  useLogoutMutation,
   useSetPasswordMutation,
-} from '../services/authApi'
+} from '@/services/authApi'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 
-export default function Dashboard() {
-  const navigate = useNavigate()
-  const dispatch = useDispatch()
-  const { data } = useGetMeQuery()
-  const [logout] = useLogoutMutation()
-  const [setPassword, { isLoading: isSettingPassword }] = useSetPasswordMutation()
+const overviewCards = [
+  { title: 'Sources', description: 'Confluence, GitHub, Jira, Teams' },
+  { title: 'Memory', description: 'Project context & decisions' },
+  { title: 'Chat', description: 'Cited, grounded answers' },
+]
+
+function SetPasswordCard() {
+  const [setPassword, { isLoading }] = useSetPasswordMutation()
   const [newPassword, setNewPassword] = useState('')
-  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  const user = data?.user
-
-  const handleLogout = async () => {
-    await logout().unwrap().catch(() => {})
-    dispatch(api.util.resetApiState())
-    navigate('/login')
-  }
-
-  const handleSetPassword = async (e: FormEvent) => {
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    setPasswordError(null)
+    setError(null)
     try {
       await setPassword({ password: newPassword }).unwrap()
       setNewPassword('')
     } catch (err) {
-      setPasswordError(errorMessage(err))
+      setError(errorMessage(err))
     }
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col items-center justify-center p-8">
-      <div className="max-w-lg w-full space-y-8">
-        <div className="text-center">
-          <h1 className="text-4xl font-bold tracking-tight text-white">
-            Dashboard
-          </h1>
-          <p className="mt-2 text-gray-400">
-            You're signed in — this route is protected.
-          </p>
-        </div>
-
-        {user && (
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-            <div className="flex items-center gap-4">
-              {user.picture ? (
-                <img
-                  src={user.picture}
-                  alt=""
-                  className="h-12 w-12 rounded-full"
-                />
-              ) : (
-                <div className="h-12 w-12 rounded-full bg-gray-800 flex items-center justify-center text-lg font-semibold text-gray-300">
-                  {user.name.charAt(0).toUpperCase()}
-                </div>
-              )}
-              <div className="min-w-0">
-                <p className="font-medium text-white truncate">{user.name}</p>
-                <p className="text-sm text-gray-400 truncate">{user.email}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {user && !user.has_password && (
-          <form
-            onSubmit={handleSetPassword}
-            className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-3"
-          >
-            <h2 className="font-medium text-white">Add a password</h2>
-            <p className="text-sm text-gray-400">
-              You signed up with Google. Set a password to also log in with
-              your email.
+    <Card>
+      <CardHeader>
+        <CardTitle>Add a password</CardTitle>
+        <CardDescription>
+          You signed up with Google. Set a password to also log in with your
+          email.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={onSubmit} className="flex flex-col gap-3">
+          {error && (
+            <p className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {error}
             </p>
-            {passwordError && (
-              <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-                {passwordError}
-              </p>
-            )}
-            <div className="flex gap-2">
-              <input
-                type="password"
-                required
-                minLength={8}
-                autoComplete="new-password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="At least 8 characters"
-                className="flex-1 bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm placeholder:text-gray-600 focus:outline-none focus:border-gray-500"
-              />
-              <button
-                type="submit"
-                disabled={isSettingPassword}
-                className="px-4 py-2 rounded-lg bg-white text-gray-950 text-sm font-medium hover:bg-gray-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isSettingPassword ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </form>
-        )}
+          )}
+          <div className="flex gap-2">
+            <Input
+              type="password"
+              required
+              minLength={8}
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="At least 8 characters"
+            />
+            <Button type="submit" disabled={isLoading}>
+              {isLoading ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  )
+}
 
-        <div className="flex justify-center">
-          <button
-            onClick={handleLogout}
-            className="px-5 py-2.5 rounded-lg border border-gray-700 text-gray-200 hover:bg-gray-900 transition"
-          >
-            Log out
-          </button>
-        </div>
+export default function Dashboard() {
+  const { data } = useGetMeQuery()
+  const user = data?.user
+
+  return (
+    <AppShell>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Welcome back{user ? `, ${user.name.split(' ')[0]}` : ''}
+        </h1>
+        <p className="text-muted-foreground">
+          Here's your project context at a glance.
+        </p>
       </div>
-    </div>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        {overviewCards.map((card) => (
+          <Card key={card.title}>
+            <CardHeader>
+              <CardTitle>{card.title}</CardTitle>
+              <CardDescription>{card.description}</CardDescription>
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
+
+      {user && !user.has_password && <SetPasswordCard />}
+    </AppShell>
   )
 }

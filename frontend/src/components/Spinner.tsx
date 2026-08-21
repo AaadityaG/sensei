@@ -1,5 +1,9 @@
 export function Spinner() {
   return (
-    <div className="h-6 w-6 rounded-full border-2 border-gray-700 border-t-white animate-spin" />
+    <div
+      role="status"
+      aria-label="Loading"
+      className="border-muted-foreground/30 border-t-foreground size-6 animate-spin rounded-full border-2"
+    />
   )
 }
