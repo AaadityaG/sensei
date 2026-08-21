@@ -103,6 +103,7 @@ backend/
 | POST | `/auth/google` | — | Body `{ credential }`. Verify ID token → upsert user → set JWT cookie |
 | GET | `/auth/me` | cookie | Return current user (or 401) — used by frontend guard |
 | POST | `/auth/logout` | — | Clear cookie |
+| POST | `/auth/set-password` | cookie | Body `{ password }`. Google-only users add a password (409 if already set) |
 | GET | `/health` | — | stays public |
 
 All three login paths end identically:
@@ -298,3 +299,66 @@ Add both keys to `.env.example` files. Never commit real values.
 5. **Frontend auth** — provider, router (`/` public, `/dashboard` guarded), Landing/Login/Register/Dashboard pages, `ProtectedRoute`
 6. **Wire together** — end-to-end: land → register/login (both paths) → dashboard → logout → redirected
 7. **Lock down APIs** — convert any real API routes to `Depends(get_current_user)` or mount them under the protected router
+
+---
+
+## 9. Status — Implemented ✅
+
+Everything above is live in the codebase:
+
+| Layer | Files |
+|---|---|
+| Backend | `backend/core/config.py`, `core/security.py` (bcrypt + JWT), `db/database.py` (indexes), `auth/routes.py`, `auth/deps.py` |
+| Frontend | `frontend/src/services/authApi.ts`, `components/ProtectedRoute.tsx`, pages `Landing / Login / Register / Dashboard` |
+| Routes | `/`, `/login`, `/register` public · `/dashboard` guarded |
+| Verified | register 201 → me 200 → dup 409 → wrong-password 401 → logout → me 401 |
+
+---
+
+## 10. Google Cloud Console — Exactly What You Need
+
+For this popup/ID-token flow you need **only the Client ID** — no client secret.
+
+| Field | Value |
+|---|---|
+| Application type | Web application |
+| Authorized JavaScript origins | `http://localhost:5173` (+ prod origin later, e.g. `https://yourapp.com`) |
+| Authorized redirect URIs | *(leave empty — not used)* |
+| Client secret | *(ignore it)* |
+
+**Why no secret:** we never exchange tokens with Google's servers. The JS button hands us a signed ID token; our backend verifies the signature against Google's **public** JWKS keys and checks `aud == GOOGLE_CLIENT_ID`. A secret is only needed for server-side authorization-code flows or calling Google APIs on the user's behalf (Gmail, Drive…). Identity proof alone needs nothing confidential.
+
+This also means exposing the client ID in frontend code (`VITE_GOOGLE_CLIENT_ID`) is safe by design — it identifies the app, it doesn't authenticate it.
+
+---
+
+## 11. Security Model — Threats & Protections
+
+| Threat | Protection in place |
+|---|---|
+| Password leak from DB | bcrypt hashes only, never plaintext |
+| Fake/spoofed Google login | Backend re-verifies signature, `aud`, `exp`, and `email_verified` itself |
+| Token theft via XSS | JWT lives in an **httpOnly cookie** — JavaScript cannot read it |
+| CSRF | `SameSite=Lax` cookie + all mutations are POST-only |
+| User enumeration | Login always returns generic `401 Invalid credentials`; register returns `409` only on true duplicates |
+| Race-condition duplicates | Unique Mongo indexes (`email`, sparse-safe partial index on `google_sub` for non-null values only) |
+
+**Known limits (fine for MVP, harden for real prod):**
+
+- No rate limiting on `/auth/*` yet → add slowapi/nginx limit before public launch
+- JWT valid for `JWT_EXPIRE_DAYS` and irrevocable mid-life → refresh tokens + denylist if revocation matters
+- `secure` cookie flag auto-enables when `DEBUG=false`; always deploy behind HTTPS
+- No CSRF token (Lax covers most cases since all mutations are POST)
+
+---
+
+## 12. One Account, Any Login Method
+
+Google sign-in and email/password are **not separate systems** — they converge:
+
+```
+register / login / google  ──►  same user doc in Mongo  ──►  same JWT cookie  ──►  /dashboard works identically
+```
+
+- The frontend never knows which method was used; it only asks `GET /auth/me`
+- **Accounts auto-link**: register with `you@mail.com` + password, then "Continue with Google" using that same verified email → you land in the *same* account (`google_sub` gets attached to the existing doc), never a duplicate
