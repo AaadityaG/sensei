@@ -35,6 +35,7 @@ class GoogleAuthIn(BaseModel):
 
 class SetPasswordIn(BaseModel):
     password: str = Field(min_length=8, max_length=128)
+    current_password: str | None = Field(default=None, max_length=128)
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
@@ -149,13 +150,23 @@ async def me(user: dict = Depends(get_current_user)):
 async def set_password(
     body: SetPasswordIn, user: dict = Depends(get_current_user), db=Depends(get_db)
 ):
-    if user.get("has_password"):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Password already set")
+    doc = await db.users.find_one({"_id": user["id"]})
+    if doc and doc.get("password_hash"):
+        # Changing an existing password requires proving the current one.
+        if not body.current_password or not verify_password(
+            body.current_password, doc["password_hash"]
+        ):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, "Current password is incorrect"
+            )
+        message = "Password updated"
+    else:
+        message = "Password set — you can now log in with email too"
 
     await db.users.update_one(
         {"_id": user["id"]}, {"$set": {"password_hash": hash_password(body.password)}}
     )
-    return {"message": "Password set — you can now log in with email too"}
+    return {"message": message}
 
 
 @router.post("/logout")

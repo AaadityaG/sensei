@@ -51,7 +51,10 @@ export const authApi = api.injectEndpoints({
       query: () => ({ url: '/auth/logout', method: 'POST' }),
       invalidatesTags: ['User'],
     }),
-    setPassword: builder.mutation<{ message: string }, { password: string }>({
+    setPassword: builder.mutation<
+      { message: string },
+      { password: string; current_password?: string }
+    >({
       query: (body) => ({ url: '/auth/set-password', method: 'POST', body }),
       invalidatesTags: ['User'],
     }),

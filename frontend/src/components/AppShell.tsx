@@ -1,10 +1,11 @@
-import { type ReactNode } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useDispatch } from 'react-redux'
 import {
   ChevronsUpDown,
   Database,
   FolderGit2,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   MessageSquare,
@@ -17,8 +18,10 @@ import {
   errorMessage,
   useGetMeQuery,
   useLogoutMutation,
+  useSetPasswordMutation,
 } from '@/services/authApi'
 import { useTheme } from '@/components/ThemeProvider'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -29,6 +32,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import {
   Sidebar,
@@ -76,6 +80,12 @@ function UserFooter() {
   const dispatch = useDispatch()
   const { data } = useGetMeQuery()
   const [logout] = useLogoutMutation()
+  const [setPassword, { isLoading: isSettingPassword }] =
+    useSetPasswordMutation()
+  const [newPassword, setNewPassword] = useState('')
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const isMobile = useIsMobile()
   const user = data?.user
 
   if (!user) return null
@@ -92,34 +102,112 @@ function UserFooter() {
     navigate('/login')
   }
 
+  const handleSetPassword = async (e: FormEvent) => {
+    e.preventDefault()
+    setPasswordError(null)
+    try {
+      await setPassword({
+        password: newPassword,
+        current_password: user.has_password ? currentPassword : undefined,
+      }).unwrap()
+      setNewPassword('')
+      setCurrentPassword('')
+    } catch (err) {
+      setPasswordError(errorMessage(err))
+    }
+  }
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button className="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-sidebar-accent">
-          <Avatar className="size-8">
-            {user.picture && <AvatarImage src={user.picture} alt={user.name} />}
-            <AvatarFallback>{initials || '?'}</AvatarFallback>
-          </Avatar>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">
-              {user.name}
-            </span>
-            <span className="block truncate text-xs text-muted-foreground">
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton
+              size="lg"
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+            >
+              <Avatar className="size-8 rounded-lg">
+                {user.picture && (
+                  <AvatarImage src={user.picture} alt={user.name} />
+                )}
+                <AvatarFallback className="rounded-lg">
+                  {initials || '?'}
+                </AvatarFallback>
+              </Avatar>
+              <div className="grid flex-1 text-left text-sm leading-tight">
+                <span className="truncate font-semibold">{user.name}</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {user.email}
+                </span>
+              </div>
+              <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
+            side={isMobile ? 'bottom' : 'right'}
+            align="end"
+            sideOffset={4}
+          >
+            <DropdownMenuLabel className="truncate">
               {user.email}
-            </span>
-          </span>
-          <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="w-(--radix-dropdown-menu-trigger-width)">
-        <DropdownMenuLabel className="truncate">{user.email}</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={handleLogout}>
-          <LogOut />
-          Log out
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <form
+              onSubmit={handleSetPassword}
+              onKeyDown={(e) => e.stopPropagation()}
+              className="px-2 py-1.5"
+            >
+              <p className="text-muted-foreground mb-2 flex items-center gap-1.5 text-xs font-medium">
+                <KeyRound className="w-4 h-4" />
+                {user.has_password ? 'Change password' : 'Add a password'}
+              </p>
+              {user.has_password && (
+                <Input
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  placeholder="Current password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className="mb-2 h-8 bg-background text-xs"
+                />
+              )}
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  placeholder="At least 8 characters"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="h-8 min-w-0 flex-1 bg-background text-xs"
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={isSettingPassword}
+                  className="h-8 shrink-0 text-xs"
+                >
+                  {isSettingPassword ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+              {passwordError && (
+                <p role="alert" className="text-destructive mt-1.5 text-xs">
+                  {passwordError}
+                </p>
+              )}
+            </form>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleLogout}>
+              <LogOut />
+              Log out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    </SidebarMenu>
   )
 }
 
