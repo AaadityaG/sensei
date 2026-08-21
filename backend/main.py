@@ -1,26 +1,48 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic_settings import BaseSettings
 from contextlib import asynccontextmanager
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
 
-class Settings(BaseSettings):
-    APP_NAME: str = "Project Team AI Agent"
-    APP_VERSION: str = "0.1.0"
-    DEBUG: bool = False
-    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000"]
-
-    class Config:
-        env_file = ".env"
-
-
-settings = Settings()
+from auth.routes import router as auth_router
+from core.config import settings
+from db.database import ensure_indexes
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
+
+    app.state.mongo_client = None
+    app.state.mongo_db = None
+
+    if not settings.MONGO_DB:
+        print("[MongoDB] MONGO_DB not set — skipping database connection")
+    else:
+        try:
+            print("[MongoDB] Connecting...")
+            client = AsyncIOMotorClient(
+                settings.MONGO_DB,
+                serverSelectionTimeoutMS=8000,
+                connectTimeoutMS=10000,
+                socketTimeoutMS=10000,
+            )
+            await client.admin.command("ping")
+            app.state.mongo_client = client
+            app.state.mongo_db = client[settings.MONGO_DB_NAME]
+            await ensure_indexes(app.state.mongo_db)
+            hosts = ", ".join(f"{h}:{p}" for h, p in client.nodes)
+            print(f"[MongoDB] Connected OK — cluster: {hosts} — db: '{settings.MONGO_DB_NAME}'")
+        except Exception as exc:
+            print(f"[MongoDB] CONNECTION FAILED: {exc}")
+
+    if not settings.JWT_SECRET:
+        print("[Auth] WARNING: JWT_SECRET is empty — login will fail until it is set")
+
     yield
+
+    if getattr(app.state, "mongo_client", None) is not None:
+        app.state.mongo_client.close()
     print("Shutting down")
 
 
@@ -37,6 +59,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
 
 
 @app.get("/health")

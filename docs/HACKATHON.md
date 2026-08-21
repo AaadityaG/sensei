@@ -31,7 +31,7 @@ Build a **new AI agent with Strands Agents SDK** that does real work for real pe
 | Track | For | Our fit |
 |---|---|---|
 | Everyday Agents | Daily life busywork: home, money, health, errands, family | |
-| **Professional Agents** | Makes someone dramatically better at the work they already do | ✅ **our pick** — Project Team AI Agent kills repetitive context-gathering for dev teams |
+| **Professional Agents** | Makes someone dramatically better at the work they already do | ✅ **our pick** — Sensei kills repetitive context-gathering for dev teams |
 | Good Neighbor Agents | Groups/orgs: neighborhoods, nonprofits, schools, libraries | |
 
 Deploying on **Amazon Bedrock AgentCore** strengthens the Technical Implementation score (not mandatory). A **live demo link** also boosts it.

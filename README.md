@@ -1,4 +1,4 @@
-# Project Team AI Agent
+# Sensei
 
 Permission-aware platform that learns approved project context and participates through chat and Microsoft Teams meetings.
 
