@@ -1,6 +1,6 @@
-# Authentication Plan — Google Sign-In + JWT
+# Authentication Plan — Google + Email/Password Auth with MongoDB
 
-Simplest secure setup for this stack: **Google Identity Services ID-token flow** on the frontend, **JWT in an httpOnly cookie** issued by FastAPI. No password storage at all.
+Simplest secure setup for this stack: **Google Identity Services ID-token flow** + **email/password register & login**, all backed by **MongoDB**, sessions issued as a **JWT in an httpOnly cookie** by FastAPI.
 
 ---
 
@@ -8,36 +8,36 @@ Simplest secure setup for this stack: **Google Identity Services ID-token flow**
 
 | Decision | Choice | Why |
 |---|---|---|
-| Identity provider | Google OAuth | Requirement — users sign up / log in with Google |
-| Flow | **ID token verification** (GIS button) | Simplest flow: no `state`/PKCE/redirect dance. Frontend receives Google's signed `credential`, backend verifies it against Google's JWKS. One POST endpoint. |
-| App session | **Our own JWT**, not Google's token | We control expiry, claims, and revocation. Never trust Google's token as a session cookie. |
-| Token transport | **httpOnly Secure cookie** (not localStorage) | Immune to XSS token theft. Works out of the box because the frontend calls the API through the existing Vite proxy → same-origin → cookies "just work" in dev. |
-| User storage | SQLite + SQLAlchemy | Matches MVP plan; swap to Postgres later. |
-| Signup vs login | **Same endpoint** | With Google-only auth they are one operation: verify identity → upsert user by `google_sub`. |
+| Identity provider | Google OAuth **+ email/password** | Google for one-click; email/password for users without Google |
+| Google flow | **ID token verification** (GIS button) | No `state`/PKCE/redirect dance. Frontend gets signed `credential`, backend verifies against Google's JWKS |
+| App session | **Our own JWT**, not Google's token | We control expiry, claims, revocation. Never use Google's token as a session cookie |
+| Token transport | **httpOnly Secure cookie** (not localStorage) | XSS-safe. Works out of the box via the Vite proxy → same-origin → cookies "just work" in dev |
+| User storage | **MongoDB** via `motor` (async driver) | Requirement — Mongo collection `users`, Pydantic models, unique indexes on `email` / `google_sub` |
+| Passwords | `bcrypt` hashes only | Never store plaintext. Google-only users have `password_hash = None` |
+| Signup vs login | **Separate `/auth/register` and `/auth/login`** | Explicit endpoints + shared `/auth/google`; all three issue the same JWT cookie |
 
 ---
 
 ## 2. User Flow
 
 ```
-┌──────────────────────┐
-│  /  (PUBLIC LANDING) │   Unprotected root page.
-│  [Sign up]  [Login]  │   Both buttons lead to /login.
-└──────────┬───────────┘
+┌──────────────────────────┐
+│  /  (PUBLIC LANDING)     │   Unprotected root page.
+│  [Login] [Get Started]   │   Buttons → /login and /register
+└──────────┬───────────────┘
            ▼
-┌──────────────────────┐    Google renders its own popup.
-│  /login              │    onSuccess(credential) ──►
-│  [ G  Continue w/ ]  │
-└──────────┬───────────┘           POST /auth/google { credential }
-           │                       Backend:
-           │                         1. verify_oauth2_token (sig, aud, exp)
-           │                         2. upsert user (google_sub, email, name)
-           ▼                         3. issue app JWT → Set-Cookie httpOnly
-┌──────────────────────┐
-│  /app  (PROTECTED)   │   Dashboard placeholder (chat comes later).
-│                      │   <ProtectedRoute> checks GET /auth/me;
-│                      │   if 401 → redirect to /login.
-└──────────────────────┘
+┌──────────────────────────┐    POST /auth/register { name, email, password }
+│  /register  (PUBLIC)     │    └─► validate → bcrypt hash → insert user → Set-Cookie
+├──────────────────────────┤
+│  /login     (PUBLIC)     │    POST /auth/login { email, password }
+│  [email/password form]   │    └─► find user → verify hash → Set-Cookie
+│  [ G  Continue w/Google] │    POST /auth/google { credential }
+└──────────┬───────────────┘    └─► verify ID token → upsert by google_sub/email → Set-Cookie
+           ▼
+┌──────────────────────────┐
+│  /dashboard  (PROTECTED) │   <ProtectedRoute> checks GET /auth/me;
+│                          │   if 401 → redirect to /login.
+└──────────────────────────┘
 ```
 
 ---
@@ -48,6 +48,7 @@ Simplest secure setup for this stack: **Google Identity Services ID-token flow**
 2. Create an **OAuth client ID** → type **Web application**
 3. Authorized JavaScript origins: `http://localhost:5173`
 4. Copy the **Client ID** (no client secret needed for this flow)
+5. Have a local or Atlas MongoDB URI ready
 
 ---
 
@@ -56,7 +57,7 @@ Simplest secure setup for this stack: **Google Identity Services ID-token flow**
 ### Dependencies
 
 ```
-pip install sqlalchemy==2.* google-auth==2.* PyJWT==2.*
+pip install motor==3.* google-auth==2.* PyJWT==2.* bcrypt==4.*
 ```
 
 ### New files
@@ -64,39 +65,82 @@ pip install sqlalchemy==2.* google-auth==2.* PyJWT==2.*
 ```
 backend/
 ├── db/
-│   ├── connection.py     # engine + session (sqlite:///./app.db)
-│   └── models.py         # User model
+│   ├── database.py        # AsyncIOMotorClient, get_db() dependency, ensure_indexes()
+│   └── models.py          # UserDoc pydantic model + helpers (serialize_user)
 ├── core/
-│   ├── config.py         # move Settings here; add JWT_SECRET, GOOGLE_CLIENT_ID
-│   └── security.py       # create_jwt(), decode_jwt()
+│   ├── config.py          # Settings: MONGODB_URI, MONGODB_DB_NAME, JWT_SECRET,
+│   │                      # GOOGLE_CLIENT_ID
+│   └── security.py        # hash_password(), verify_password(), create_jwt(), decode_jwt()
 └── auth/
-    ├── routes.py         # POST /auth/google, POST /auth/logout, GET /auth/me
-    └── deps.py           # get_current_user dependency (reads cookie, decodes JWT)
+    ├── routes.py          # POST /auth/register, /auth/login, /auth/google,
+    │                      # GET /auth/me, POST /auth/logout
+    └── deps.py            # get_current_user dependency (reads cookie, decodes JWT,
+                           #   loads user from Mongo)
 ```
 
-### User model
+### User document (`users` collection)
 
 ```python
-class User(Base):
-    __tablename__ = "users"
-    id          = Column(String, primary_key=True)      # uuid4
-    google_sub  = Column(String, unique=True, index=True)  # stable Google ID
-    email       = Column(String, unique=True, index=True)
-    name        = Column(String)
-    picture     = Column(String, nullable=True)
-    created_at  = Column(DateTime, default=datetime.utcnow)
+{
+    "_id":          str(uuid4()),
+    "google_sub":   str | None,      # stable Google ID (None for password users)
+    "email":        str,             # unique index
+    "name":         str,
+    "picture":      str | None,
+    "password_hash": str | None,     # None for Google-only accounts
+    "created_at":   datetime,
+}
+# db/users.create_index("email", unique=True)
+# db/users.create_index("google_sub", unique=True, sparse=True)
 ```
 
 ### Endpoints
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/auth/google` | — | Body: `{ credential }`. Verify ID token → upsert user → set JWT cookie |
+| POST | `/auth/register` | — | Body `{ name, email, password }` → 409 if email exists → bcrypt hash → insert → set JWT cookie |
+| POST | `/auth/login` | — | Body `{ email, password }` → verify bcrypt hash (generic 401 on any failure) → set JWT cookie |
+| POST | `/auth/google` | — | Body `{ credential }`. Verify ID token → upsert user → set JWT cookie |
 | GET | `/auth/me` | cookie | Return current user (or 401) — used by frontend guard |
 | POST | `/auth/logout` | — | Clear cookie |
 | GET | `/health` | — | stays public |
 
-### Verification logic (`POST /auth/google`)
+All three login paths end identically:
+
+```python
+jwt = create_jwt(sub=user["id"], email=user["email"])
+response.set_cookie("access_token", jwt, httponly=True, samesite="lax",
+                    secure=not settings.DEBUG, max_age=7*24*3600)
+```
+
+### Register/login logic sketch
+
+```python
+@router.post("/register")
+async def register(body: RegisterIn, response: Response, db=Depends(get_db)):
+    if await db.users.find_one({"email": body.email.lower()}):
+        raise HTTPException(409, "Email already registered")
+    doc = {
+        "_id": str(uuid4()), "email": body.email.lower(), "name": body.name,
+        "password_hash": hash_password(body.password),
+        "google_sub": None, "picture": None, "created_at": datetime.utcnow(),
+    }
+    await db.users.insert_one(doc)
+    _set_session_cookie(response, doc)
+    return serialize_user(doc)
+
+@router.post("/login")
+async def login(body: LoginIn, response: Response, db=Depends(get_db)):
+    user = await db.users.find_one({"email": body.email.lower()})
+    # same generic error whether email missing or wrong password (no user enumeration)
+    if not user or not user["password_hash"] \
+       or not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(401, "Invalid credentials")
+    _set_session_cookie(response, user)
+    return serialize_user(user)
+```
+
+### Google verification logic (`POST /auth/google`)
 
 ```python
 from google.auth.transport import requests as google_requests
@@ -109,26 +153,32 @@ info = id_token.verify_oauth2_token(
 
 # info["sub"], info["email"], info["email_verified"], info["name"], info["picture"]
 # reject if not info.get("email_verified")
-# upsert user by google_sub → jwt = create_jwt(sub=user.id, email=user.email)
-# response.set_cookie("access_token", jwt, httponly=True, samesite="lax",
-#                     secure=not settings.DEBUG, max_age=7*24*3600)
+# upsert: match google_sub first, else link existing email account, else insert new doc
+# then issue app JWT cookie (same as above)
 ```
 
-### Protecting everything else
+### API protection — everything else requires auth
 
-Any future route that must be private takes `user: User = Depends(get_current_user)`.
+Any future route that must be private takes `user = Depends(get_current_user)`.
 
 ```python
 # auth/deps.py
-async def get_current_user(cookie: str | None = Cookie(None, alias="access_token"),
-                           db: Session = Depends(get_db)) -> User:
-    if not cookie:
+async def get_current_user(access_token: str | None = Cookie(None, alias="access_token"),
+                           db=Depends(get_db)) -> dict:
+    if not access_token:
         raise HTTPException(401)
-    payload = decode_jwt(cookie)          # validates signature + exp
-    user = db.get(User, payload["sub"])
+    payload = decode_jwt(access_token)     # validates signature + exp
+    user = await db.users.find_one({"_id": payload["sub"]})
     if not user:
         raise HTTPException(401)
-    return user
+    return serialize_user(user)
+```
+
+Optionally add a tiny helper router prefix guard so whole feature routers are protected at once:
+
+```python
+protected = APIRouter(dependencies=[Depends(get_current_user)])
+router.include_router(protected)          # e.g. all /chat/* routes live here
 ```
 
 ---
@@ -146,14 +196,15 @@ npm install @react-oauth/google react-router-dom
 ```
 frontend/src/
 ├── pages/
-│   ├── Landing.tsx        # current App content → public root "/"
-│   ├── Login.tsx          # Google button page "/login"
-│   └── Dashboard.tsx      # protected "/app"
+│   ├── Landing.tsx         # current App content → public root "/"
+│   ├── Login.tsx           # "/login" — email/password form + Google button
+│   ├── Register.tsx        # "/register" — signup form + Google button
+│   └── Dashboard.tsx       # protected "/dashboard"
 ├── components/
-│   └── ProtectedRoute.tsx # queries /auth/me, redirects on 401
+│   └── ProtectedRoute.tsx  # queries /auth/me, redirects on 401
 ├── services/
-│   └── authApi.ts         # RTK Query: googleAuth, getMe, logout
-└── App.tsx                # BrowserRouter + GoogleOAuthProvider + Routes
+│   └── authApi.ts          # RTK Query: register, login, googleAuth, getMe, logout
+└── App.tsx                 # BrowserRouter + GoogleOAuthProvider + Routes
 ```
 
 ### Wiring sketch
@@ -163,20 +214,31 @@ frontend/src/
 <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID}>
   <BrowserRouter>
     <Routes>
-      <Route path="/" element={<Landing />} />          {/* public */}
-      <Route path="/login" element={<Login />} />       {/* public */}
-      <Route path="/app" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+      <Route path="/" element={<Landing />} />              {/* PUBLIC root */}
+      <Route path="/login" element={<Login />} />           {/* public */}
+      <Route path="/register" element={<Register />} />     {/* public */}
+      <Route path="/dashboard"
+             element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
     </Routes>
   </BrowserRouter>
 </GoogleOAuthProvider>
 ```
 
 ```tsx
+// ProtectedRoute.tsx — gate on /auth/me
+const { data, isLoading, isError } = useGetMeQuery();
+if (isLoading) return <Spinner />;
+if (isError || !data) return <Navigate to="/login" replace />;
+return children;
+```
+
+```tsx
 // Login.tsx
+<form onSubmit={login({ email, password }).unwrap().then(() => navigate('/dashboard'))}>…</form>
 <GoogleLogin
   onSuccess={({ credential }) => {
     googleAuth({ credential })            // RTK mutation → sets cookie
-      .then(() => navigate('/app'))
+      .then(() => navigate('/dashboard'))
   }}
 />
 ```
@@ -193,6 +255,8 @@ baseQuery: fetchBaseQuery({ baseUrl: '/api', credentials: 'include' })
 
 **backend/.env**
 ```
+MONGODB_URI=mongodb://localhost:27017        # or mongodb+srv://... (Atlas)
+MONGODB_DB_NAME=app
 GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
 JWT_SECRET=<openssl rand -hex 32>
 JWT_EXPIRE_DAYS=7
@@ -211,23 +275,26 @@ Add both keys to `.env.example` files. Never commit real values.
 
 ## 7. Security Checklist
 
+- [x] Passwords stored as bcrypt hashes only — never plaintext; Google accounts have `hash = NULL`
+- [x] Generic `401 Invalid credentials` on login (no user enumeration); 409 on duplicate register
 - [x] Backend verifies ID token signature, `aud == GOOGLE_CLIENT_ID`, `exp`, and `email_verified`
 - [x] Session token is our own short-lived JWT — never Google's token
 - [x] JWT in `httponly` cookie → unreachable from JS (XSS-safe); add `secure=true` in prod
 - [x] `SameSite=Lax` blocks most CSRF; all mutating endpoints are POST
-- [x] Every non-auth endpoint depends on `get_current_user`
+- [x] Unique indexes enforced in Mongo (`email`, sparse-unique `google_sub`) — race-safe upserts
+- [x] Every non-auth endpoint depends on `get_current_user` (API protection)
+- [x] Frontend guards `/dashboard` via `ProtectedRoute` (route protection); `/`, `/login`, `/register` stay public
 - [x] CORS locked to known origins (already configured in `main.py`)
-- [x] No passwords stored → no password-reset/leak surface
-- [ ] Prod hardening later: refresh tokens, CSRF token on cookie, rate-limit `/auth/google`
+- [ ] Prod hardening later: refresh tokens, CSRF token on cookie, rate-limit `/auth/*`
 
 ---
 
 ## 8. Build Order (~ half a day)
 
-1. **Google Cloud** — create OAuth client ID (Section 3)
-2. **DB** — `db/connection.py` + `User` model, auto-create tables on startup
-3. **Core** — config additions, `security.py` (create/decode JWT)
-4. **Auth routes** — `/auth/google`, `/auth/me`, `/auth/logout`; test in Swagger UI (`/docs`) with a raw credential from [Google's token tool](https://developers.google.com/identity/gsi/web/tools/verify-id-token)
-5. **Frontend auth** — provider, router, Landing/Login/Dashboard pages, ProtectedRoute
-6. **Wire together** — end-to-end: land → login → dashboard → logout → redirected
-7. **Lock down** — convert any real API routes to `Depends(get_current_user)`
+1. **Prereqs** — Google OAuth client ID (Section 3); running Mongo (local or Atlas free tier)
+2. **DB layer** — `db/database.py` (motor client + `ensure_indexes()` on startup), `db/models.py`
+3. **Core** — config additions (`MONGODB_URI`, etc.), `security.py` (bcrypt + create/decode JWT)
+4. **Auth routes** — `/auth/register`, `/auth/login`, `/auth/google`, `/auth/me`, `/auth/logout`; test in Swagger UI (`/docs`)
+5. **Frontend auth** — provider, router (`/` public, `/dashboard` guarded), Landing/Login/Register/Dashboard pages, `ProtectedRoute`
+6. **Wire together** — end-to-end: land → register/login (both paths) → dashboard → logout → redirected
+7. **Lock down APIs** — convert any real API routes to `Depends(get_current_user)` or mount them under the protected router
