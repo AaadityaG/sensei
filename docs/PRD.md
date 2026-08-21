@@ -1,5 +1,5 @@
 # PRODUCT REQUIREMENTS DOCUMENT
-## Project Team AI Agent
+## Sensei
 An independent platform that learns approved project context and participates through chat and meetings.
 
 | Field | Value |
@@ -9,7 +9,7 @@ An independent platform that learns approved project context and participates th
 | Document status | Consolidated product requirements |
 
 ## 1. Product Summary
-The Project Team AI Agent is a permission-aware platform that joins a project like a new team member. Through its own website, it onboards approved sources, builds a continuously updated project memory, and provides grounded answers through chat, voice, and Microsoft Teams meetings.
+Sensei is a permission-aware platform that joins a project like a new team member. Through its own website, it onboards approved sources, builds a continuously updated project memory, and provides grounded answers through chat, voice, and Microsoft Teams meetings.
 
 Microsoft Teams is an integration channel—not the product itself. The platform owns onboarding, access configuration, project context, verification, and administration.
 

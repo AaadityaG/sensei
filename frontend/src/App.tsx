@@ -8,7 +8,7 @@ function App() {
       <div className="max-w-lg w-full space-y-8">
         <div className="text-center">
           <h1 className="text-4xl font-bold tracking-tight text-white">
-            Project Team AI Agent
+            Sensei
           </h1>
           <p className="mt-2 text-gray-400">
             Permission-aware project context platform
