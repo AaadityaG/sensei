@@ -74,5 +74,7 @@ hack-agents-for-human/
 │   │   └── services/
 │   ├── package.json
 │   └── vite.config.ts
-└── PRD.md
+├── PRD.md            # Product requirements
+├── AUTH_PLAN.md      # Auth design & build plan
+└── HACKATHON.md      # Hackathon rules & submission checklist
 ```
