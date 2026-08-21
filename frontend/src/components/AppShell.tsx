@@ -131,10 +131,12 @@ function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <a href="/">
-                <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold">
                   S
                 </span>
-                <span className="font-semibold">Sensei</span>
+                <span className="truncate font-semibold group-data-[collapsible=icon]:hidden">
+                  Sensei
+                </span>
               </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
